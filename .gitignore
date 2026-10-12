@@ -1,0 +1,16 @@
+# ESP-IDF build output
+build/
+managed_components/
+dependencies.lock
+
+# Flash dumps / extracted artifacts (large, and these are attack *outputs*,
+# not source -- keep them out of git, store them separately for the thesis)
+*.bin
+app_dump.bin
+
+# sdkconfig backups IDF generates
+sdkconfig.old
+
+# Editor/OS cruft
+.DS_Store
+Thumbs.db
