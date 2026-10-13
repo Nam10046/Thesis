@@ -1,17 +1,15 @@
 /*
- * TAMPERED firmware for the thesis — Attack 2: firmware tampering.
+ * Baseline (UNPROTECTED) firmware for the thesis.
  *
- * This is a deliberately modified copy of hello_world_main.c. It still
- * runs the real gas_model inference, but the result is overridden
- * before anything is reported: the device always claims "water" (the
- * "safe" class) regardless of what the model actually computed.
+ * Runs the real "ethanol_detect" gas-classification model (ported from
+ * the R&D project's trained ONNX model) on boot, against a fixed test
+ * window, and prints the prediction + inference latency.
  *
- * This simulates an attacker who altered the firmware on an unprotected
- * device so a monitoring system silently stops reporting real readings.
- * It is flashed the exact same way as the baseline firmware — the point
- * being demonstrated is that, with no protection enabled, there is
- * nothing on this device that distinguishes "the real firmware" from
- * "this tampered firmware." Both flash and both boot without complaint.
+ * This is the version that gets attacked first (Chapter 4): flash dump,
+ * firmware tampering, buffer-overflow memory read. Later, Secure Boot V2
+ * + Flash Encryption get enabled and the SAME model/logic is reflashed
+ * as the protected build, so boot time / inference latency / flash size
+ * can be compared directly against this baseline.
  */
 
 #include <stdio.h>
@@ -26,9 +24,10 @@
 
 #include "gas_model.h"
 
-// Same fixed test window as the baseline build, unchanged — so any
-// difference in the printed result comes only from the tampering below,
-// not from different input data.
+// Fixed test window standing in for a live BME688 reading until the
+// real-board classifier (being built in gasnet_live) is swapped in.
+// Same shape the ONNX model expects: 10 heater-cycle steps x
+// [resistance, temperature, duration, heaterProfileID].
 static const gas_window_t TEST_WINDOW = {
     {500000.0f, 25.0f, 100.0f, 3.0f},
     {573110.3f, 25.1f, 100.0f, 3.0f},
@@ -48,6 +47,7 @@ void app_main(void)
 {
     printf("Hello world!\n");
 
+    /* Print chip information */
     esp_chip_info_t chip_info;
     uint32_t flash_size;
     esp_chip_info(&chip_info);
@@ -70,23 +70,18 @@ void app_main(void)
            (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" : "external");
     printf("Minimum free heap size: %" PRIu32 " bytes\n", esp_get_minimum_free_heap_size());
 
-    printf("\n--- gas_model inference ---\n");
+    /* --- Gas model inference + timing (what Chapter 5 measures) --- */
+    printf("\n--- gas_model baseline inference ---\n");
     float probs[GAS_N_CLASSES];
-    int64_t t0 = esp_timer_get_time();
-    int real_cls = gas_model_predict(TEST_WINDOW, probs);   // real model output, computed as normal
+    int64_t t0 = esp_timer_get_time();           // microseconds
+    int cls = gas_model_predict(TEST_WINDOW, probs);
     int64_t t1 = esp_timer_get_time();
 
-    // --- TAMPERING: override the real result before it is ever reported ---
-    // A genuine attacker wouldn't leave a comment here, obviously — this
-    // line stands in for whatever modification forces the "safe" class.
-    int reported_cls = 1; // 1 = "water", forced regardless of real_cls
-
-    printf("[internal] model actually computed: %s (p_ethanol=%.6f, p_water=%.6f)\n",
-           CLASS_NAMES[real_cls], probs[0], probs[1]);
-    printf("reported class: %d (%s)\n", reported_cls, CLASS_NAMES[reported_cls]);
+    printf("probs: ethanol=%.6f water=%.6f\n", probs[0], probs[1]);
+    printf("predicted class: %d (%s)\n", cls, CLASS_NAMES[cls]);
     printf("inference latency: %lld us\n", (long long)(t1 - t0));
 
-    printf("\nTAMPERED BUILD — reported result does not match the model's real output.\n");
+    printf("\nUNPROTECTED BUILD — no Secure Boot, no Flash Encryption.\n");
 
     for (int i = 10; i >= 0; i--) {
         printf("Restarting in %d seconds...\n", i);
