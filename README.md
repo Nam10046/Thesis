@@ -1,53 +1,102 @@
-| Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-H2 | ESP32-H21 | ESP32-H4 | ESP32-P4 | ESP32-S2 | ESP32-S3 | ESP32-S31 | Linux |
-| ----------------- | ----- | -------- | -------- | -------- | -------- | --------- | -------- | --------- | -------- | -------- | -------- | -------- | --------- | ----- |
+# Securing TinyML Model Deployment on ESP32-C6
 
-# Hello World Example
+Firmware, attack scripts, and build configuration for the Bachelor's thesis
+**"Securing TinyML Model Deployment on ESP32-C6: Protecting Against Firmware
+Tampering and Model Extraction"** (Ton That Nam, Turku University of Applied
+Sciences, 2026).
 
-Starts a FreeRTOS task to print "Hello World".
+The thesis deploys a small TinyML gas-classification model on an ESP32-C6,
+attacks it on an unprotected build, then enables the chip's hardware security
+features (Secure Boot V2 + Flash Encryption) and repeats the attacks to measure
+what is blocked and at what cost. This repository contains everything needed to
+reproduce that work.
 
-(See the README.md file in the upper level 'examples' directory for more information about examples.)
+---
 
-## How to use example
+## Hardware & toolchain
 
-Follow detailed instructions provided specifically for this example.
+- **Board:** ESP32-C6 (RISC-V)
+- **Framework:** ESP-IDF v6.1
+- **Flashing:** UART, `esptool`
 
-Select the instructions depending on Espressif chip installed on your development board:
+## The model
 
-- [ESP32 Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/stable/get-started/index.html)
-- [ESP32-S2 Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s2/get-started/index.html)
+`ethanol_detect` — a feed-forward neural network ported to plain C from the
+AISmellX research project's ONNX model.
 
+- Input: a 10-step heater-profile window → 28 engineered features
+- Topology: 28 → 32 → 16 → 2 (ReLU, ReLU, Softmax), **1,490 parameters**
+- Output: two classes (0 = ethanol, 1 = water)
 
-## Example folder contents
+Implemented in [`main/gas_model.c`](main/gas_model.c) /
+[`main/gas_model.h`](main/gas_model.h); weights in
+[`main/model_weights.h`](main/model_weights.h).
 
-The project **hello_world** contains one source file in C language [hello_world_main.c](main/hello_world_main.c). The file is located in folder [main](main).
+## Firmware variants
 
-ESP-IDF projects are built using CMake. The project build configuration is contained in `CMakeLists.txt` files that provide set of directives and instructions describing the project's source files and targets (executable, library, or both).
+The project builds `main/hello_world_main.c`. Four variants are provided; swap
+the one you want into `hello_world_main.c` (or copy its contents) before
+building:
 
-Below is short explanation of remaining files in the project folder.
+| File | Purpose |
+|---|---|
+| `main/hello_world_main_baseline.c`  | Unprotected baseline: runs the model, prints result + latency |
+| `main/hello_world_main_tampered.c`  | **Attack 2** — runs the model but reports a falsified class |
+| `main/hello_world_main_vuln.c`      | **Attack 3** — adds a planted stack buffer-overflow bug + weight-leak routine |
+| `main/hello_world_main.c` (current) | Protected-build status firmware: reports Secure Boot / Flash Encryption state, runs the model, keeps the Attack-3 code for re-testing |
 
+## The three attacks
+
+1. **Model extraction** — dump the flash with `esptool read-flash` and recover
+   the weights. On the unprotected build the weights appear in cleartext; under
+   Flash Encryption the dump is ciphertext.
+2. **Firmware tampering** — flash a modified image. On the unprotected build it
+   boots and lies; under Secure Boot V2 the modified image fails verification and
+   will not boot.
+3. **Buffer overflow** — send an over-long command into a 32-byte buffer to
+   overwrite the saved return address. Helper: [`main/overflow_test.py`](main/overflow_test.py)
+   (sends 80 bytes in one write) and `main/exploit3.py`. This is a **runtime**
+   bug and is **not** blocked by Secure Boot or Flash Encryption.
+
+## Build & flash
+
+Unprotected build:
+
+```bash
+idf.py build
+idf.py -p <PORT> flash monitor
 ```
-├── CMakeLists.txt
-├── pytest_hello_world.py      Python script used for automated testing
-├── main
-│   ├── CMakeLists.txt
-│   └── hello_world_main.c
-└── README.md                  This is the file you are currently reading
+
+Protected build (Secure Boot V2 + Flash Encryption enabled in `menuconfig`,
+Security features; Development mode): once the eFuses are burned the device is
+encrypted, so **always** use the encrypted flash command:
+
+```bash
+idf.py -p <PORT> encrypted-flash monitor
 ```
 
-For more information on structure and contents of ESP-IDF projects, please refer to Section [Build System](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/build-system.html) of the ESP-IDF Programming Guide.
+See the thesis, Chapter 4.5, for the full enabling procedure (key generation,
+menuconfig options, partition-table offset change, first-boot eFuse burn).
 
-## Troubleshooting
+## Results (summary)
 
-* Program upload failure
+| Attack | Unprotected | Protected |
+|---|---|---|
+| 1 — Flash dump | weights extracted | blocked (ciphertext) — *Flash Encryption* |
+| 2 — Tampering | false result booted | blocked (will not boot) — *Secure Boot V2* |
+| 3 — Buffer overflow | control-flow hijack | not blocked (runtime bug) |
 
-    * Hardware connection is not correct: run `idf.py -p PORT monitor`, and reboot your board to see if there are any output logs.
-    * The baud rate for downloading is too high: lower your baud rate in the `menuconfig` menu, and try again.
+Cost of protection: boot time 236 → 315 ms, inference latency 1,548 → 1,694 µs
+(~9%), flash +~60 KB (bootloader roughly doubles).
 
-## Technical support and feedback
+## Security note
 
-Please use the following feedback channels:
+The Secure Boot signing key (`secure_boot_signing_key.pem`) is **intentionally
+excluded** from this repository (see `.gitignore`) and must never be committed —
+its secrecy is what Secure Boot relies on. Flash dumps and build artifacts
+(`*.bin`, `build/`) are excluded as well.
 
-* For technical queries, go to the [esp32.com](https://esp32.com/) forum
-* For a feature request or bug report, create a [GitHub issue](https://github.com/espressif/esp-idf/issues)
+## Author
 
-We will get back to you as soon as possible.
+Ton That Nam — Information and Communications Technology, Turku University of
+Applied Sciences, 2026.

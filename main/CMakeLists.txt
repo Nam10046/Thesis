@@ -1,3 +1,3 @@
 idf_component_register(SRCS "hello_world_main.c" "gas_model.c"
-                       PRIV_REQUIRES spi_flash esp_timer
+                       PRIV_REQUIRES spi_flash esp_timer bootloader_support
                        INCLUDE_DIRS "")

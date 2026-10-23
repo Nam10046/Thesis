@@ -1,0 +1,3 @@
+Command: C:\Espressif\tools\python\v6.1\venv\Scripts\python.exe -m espsecure generate-signing-key --version 2 --scheme rsa3072 secure_boot_signing_key.pem
+espsecure v5.3.1
+RSA 3072 private key in PEM format written to "secure_boot_signing_key.pem".

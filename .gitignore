@@ -14,3 +14,7 @@ sdkconfig.old
 # Editor/OS cruft
 .DS_Store
 Thumbs.db
+
+# Secure Boot signing key -- NEVER commit a private signing key
+secure_boot_signing_key.pem
+*.pem
